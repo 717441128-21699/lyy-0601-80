@@ -1,15 +1,18 @@
 import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { ChevronLeft, ChevronRight, Clock, Star, StarOff, FileText, CheckCircle, XCircle, AlertCircle, BookOpen, RefreshCw } from 'lucide-react';
 import { usePracticeStore } from '@/store/usePracticeStore';
 import { useWrongQuestionStore } from '@/store/useWrongQuestionStore';
 import { useNoteStore } from '@/store/useNoteStore';
 import { useQuestionBankStore } from '@/store/useQuestionBankStore';
 import { useAnalysisStore } from '@/store/useAnalysisStore';
+import { useUserStore } from '@/store/useUserStore';
 import { REASON_TYPES, DIFFICULTY_MAP, QUESTION_TYPE_MAP, ReasonType } from '@/types';
 
 export default function PracticePage() {
   const navigate = useNavigate();
+  const location = useLocation();
+  const { updateTaskProgress } = useUserStore();
   const {
     isActive,
     currentQuestionIndex,
@@ -33,12 +36,15 @@ export default function PracticePage() {
   const { toggleFavorite, getFilteredQuestions } = useQuestionBankStore();
   const { addDailyStat } = useAnalysisStore();
 
+  const taskId = (location.state as { taskId?: string })?.taskId;
+
   const [selectedAnswer, setSelectedAnswer] = useState<string>('');
   const [selectedReason, setSelectedReason] = useState<ReasonType | null>(null);
   const [showResult, setShowResult] = useState(false);
   const [elapsedTime, setElapsedTime] = useState(0);
   const [questionTime, setQuestionTime] = useState(0);
   const [reasonConfirmed, setReasonConfirmed] = useState(false);
+  const [taskProgressUpdated, setTaskProgressUpdated] = useState(false);
 
   const currentQuestion = questions[currentQuestionIndex];
   const notes = currentQuestion ? getNotesByQuestion(currentQuestion.id) : [];
@@ -138,6 +144,10 @@ export default function PracticePage() {
       const result = finishSession();
       if (result) {
         addDailyStat(result.totalQuestions, result.correctCount, Math.floor(result.totalTime / 60));
+        if (taskId && !taskProgressUpdated) {
+          updateTaskProgress(taskId, result.totalQuestions);
+          setTaskProgressUpdated(true);
+        }
       }
       setShowResult(true);
     }
@@ -145,7 +155,11 @@ export default function PracticePage() {
 
   const handleFinishPractice = () => {
     resetSession();
-    navigate('/');
+    if (taskId) {
+      navigate('/plan');
+    } else {
+      navigate('/');
+    }
   };
 
   const handleStartQuickPractice = () => {

@@ -56,6 +56,7 @@ export default function WrongQuestionsPage() {
     getWeakPoints,
     markAsReviewed,
     markAsMastered,
+    updateReason,
   } = useWrongQuestionStore();
 
   const { subjects, questions, chapters, setSubject, setChapter } =
@@ -67,6 +68,7 @@ export default function WrongQuestionsPage() {
   const [selectedReason, setSelectedReason] = useState<ReasonType | null>(null);
   const [searchKeyword, setSearchKeyword] = useState('');
   const [showFilters, setShowFilters] = useState(false);
+  const [editingReasonId, setEditingReasonId] = useState<string | null>(null);
 
   const todayReviews = getTodayReviews();
   const weakPoints = getWeakPoints();
@@ -156,8 +158,8 @@ export default function WrongQuestionsPage() {
     navigate('/practice');
   };
 
-  const getReasonBadge = (reasonType: string) => {
-    const reason = REASON_TYPES.find((r) => r.value === reasonType);
+  const getReasonBadge = (wrongQuestion: WrongQuestion) => {
+    const reason = REASON_TYPES.find((r) => r.value === wrongQuestion.reasonType);
     if (!reason) return null;
 
     const colorMap: Record<string, string> = {
@@ -168,22 +170,52 @@ export default function WrongQuestionsPage() {
       other: 'bg-gray-100 text-gray-700',
     };
 
+    const isEditing = editingReasonId === wrongQuestion.id;
+
+    if (isEditing) {
+      return (
+        <div className="flex items-center gap-1">
+          <select
+            value={wrongQuestion.reasonType}
+            onChange={(e) => {
+              updateReason(wrongQuestion.id, e.target.value as ReasonType);
+              setEditingReasonId(null);
+            }}
+            onBlur={() => setEditingReasonId(null)}
+            autoFocus
+            className="badge border-0 bg-slate-100 text-slate-700 cursor-pointer focus:outline-none focus:ring-2 focus:ring-primary-500"
+          >
+            {REASON_TYPES.map((r) => (
+              <option key={r.value} value={r.value}>
+                {r.label}
+              </option>
+            ))}
+          </select>
+        </div>
+      );
+    }
+
     return (
-      <span className={`badge ${colorMap[reasonType] || 'bg-slate-100 text-slate-700'}`}>
+      <button
+        onClick={() => setEditingReasonId(wrongQuestion.id)}
+        className={`badge ${colorMap[wrongQuestion.reasonType] || 'bg-slate-100 text-slate-700'} hover:opacity-80 transition-opacity cursor-pointer`}
+        title="点击修改错误原因"
+      >
         {reason.label}
-      </span>
+        <ChevronRight className="w-3 h-3 ml-0.5" />
+      </button>
     );
   };
 
   const getErrorRateColor = (errorRate: number) => {
-    if (errorRate > 0.6) return 'text-error-600';
-    if (errorRate > 0.4) return 'text-orange-600';
+    if (errorRate >= 0.6) return 'text-error-600';
+    if (errorRate >= 0.4) return 'text-orange-600';
     return 'text-yellow-600';
   };
 
   const getErrorRateBg = (errorRate: number) => {
-    if (errorRate > 0.6) return 'bg-error-500';
-    if (errorRate > 0.4) return 'bg-orange-500';
+    if (errorRate >= 0.6) return 'bg-error-500';
+    if (errorRate >= 0.4) return 'bg-orange-500';
     return 'bg-yellow-500';
   };
 
@@ -498,7 +530,7 @@ export default function WrongQuestionsPage() {
                           <span className={`badge ${DIFFICULTY_MAP[question.difficulty].color}`}>
                             {DIFFICULTY_MAP[question.difficulty].label}
                           </span>
-                          {getReasonBadge(wrongQuestion.reasonType)}
+                          {getReasonBadge(wrongQuestion)}
                           {subject && (
                             <span className="badge-primary">
                               {subject.name}

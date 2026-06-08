@@ -198,14 +198,14 @@ export default function PlanPage() {
       );
       if (wrongQuestions.length > 0) {
         startSession(wrongQuestions.slice(0, task.targetCount), 'wrong', 'single');
-        navigate('/practice');
+        navigate('/practice', { state: { taskId: task.id } });
         return;
       }
     }
     
     if (questions.length > 0) {
       startSession(questions, task.type === 'review' ? 'wrong' : 'practice', 'single');
-      navigate('/practice');
+      navigate('/practice', { state: { taskId: task.id } });
     }
   };
 

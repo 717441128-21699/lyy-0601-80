@@ -227,11 +227,11 @@ export const useWrongQuestionStore = create<WrongQuestionState>((set, get) => ({
       const totalCount = stats.totalCount || stats.wrongCount;
       const errorRate = stats.wrongCount / totalCount;
       
-      if (errorRate > 0.3) {
+      if (errorRate > 0.4) {
         let recommendation = '有待提高，建议定期复习';
-        if (errorRate > 0.6) {
+        if (errorRate >= 0.6) {
           recommendation = '急需加强，建议重新学习章节内容';
-        } else if (errorRate > 0.4) {
+        } else if (errorRate >= 0.4) {
           recommendation = '需要重点练习，建议多做相关题目';
         }
         

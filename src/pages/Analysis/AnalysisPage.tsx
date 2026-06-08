@@ -30,6 +30,8 @@ import {
   Bar,
   Cell,
   ReferenceLine,
+  PieChart,
+  Pie,
 } from 'recharts';
 import { StatCard } from '@/components/ui/StatCard';
 import Empty from '@/components/Empty';
@@ -37,7 +39,8 @@ import { useAnalysisStore } from '@/store/useAnalysisStore';
 import { useWrongQuestionStore } from '@/store/useWrongQuestionStore';
 import { useQuestionBankStore } from '@/store/useQuestionBankStore';
 import { usePracticeStore } from '@/store/usePracticeStore';
-import type { HeatmapData, RadarData } from '@/types';
+import type { HeatmapData, RadarData, ReasonType } from '@/types';
+import { REASON_TYPES } from '@/types';
 import { cn } from '@/lib/utils';
 
 export default function AnalysisPage() {
@@ -53,7 +56,7 @@ export default function AnalysisPage() {
     getSubjectAccuracy,
     getScoreTrend,
   } = useAnalysisStore();
-  const { getWeakPoints } = useWrongQuestionStore();
+  const { getWeakPoints, getReasonStats } = useWrongQuestionStore();
   const { subjects, setSubject, setChapter } = useQuestionBankStore();
   usePracticeStore();
 
@@ -66,6 +69,27 @@ export default function AnalysisPage() {
   }));
   const weakPoints = getWeakPoints().slice(0, 10);
   const scoreTrend = getScoreTrend();
+  const reasonStats = getReasonStats();
+
+  const reasonPieData = useMemo(() => {
+    const colorMap: Record<ReasonType, string> = {
+      concept: '#3B82F6',
+      law: '#8B5CF6',
+      review: '#F97316',
+      careless: '#EAB308',
+      other: '#6B7280',
+    };
+    
+    return reasonStats.map((item) => {
+      const reason = REASON_TYPES.find((r) => r.value === item.reason);
+      return {
+        name: reason?.label || item.reason,
+        value: item.count,
+        percentage: Math.round(item.percentage * 100),
+        color: colorMap[item.reason] || '#6B7280',
+      };
+    });
+  }, [reasonStats]);
 
   const handleRefresh = () => {
     setIsRefreshing(true);
@@ -565,84 +589,160 @@ export default function AnalysisPage() {
           </div>
         </div>
 
-        <div className="card p-6 animate-slide-up" style={{ animationDelay: '450ms' }}>
+        <div className="card p-6 animate-slide-up" style={{ animationDelay: '420ms' }}>
           <div className="flex items-center gap-2 mb-4">
-            <AlertTriangle className="w-5 h-5 text-error-500" />
-            <h3 className="font-serif text-lg font-semibold text-slate-900">薄弱知识点排行</h3>
+            <AlertTriangle className="w-5 h-5 text-orange-500" />
+            <h3 className="font-serif text-lg font-semibold text-slate-900">错误原因统计</h3>
           </div>
-          <div className="h-80 overflow-y-auto space-y-3 pr-2">
-            {weakPoints.length > 0 ? (
-              weakPoints.map((wp, index) => (
-                <div
-                  key={wp.chapterId}
-                  className="p-4 rounded-lg border border-slate-200 bg-slate-50 hover:border-error-300 hover:bg-error-50/50 transition-all duration-200"
-                  style={{ animationDelay: `${index * 50}ms` }}
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="flex-1 min-w-0">
+          <div className="h-80">
+            {reasonPieData.length > 0 && reasonPieData.some(d => d.value > 0) ? (
+              <>
+                <div className="h-48">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie
+                        data={reasonPieData.filter(d => d.value > 0)}
+                        cx="50%"
+                        cy="50%"
+                        innerRadius={40}
+                        outerRadius={70}
+                        paddingAngle={5}
+                        dataKey="value"
+                        label={({ name, percentage }) => `${name} ${percentage}%`}
+                        labelLine={true}
+                      >
+                        {reasonPieData.filter(d => d.value > 0).map((entry, index) => (
+                          <Cell key={`cell-${index}`} fill={entry.color} />
+                        ))}
+                      </Pie>
+                      <Tooltip
+                        content={({ active, payload }) => {
+                          if (active && payload && payload.length) {
+                            const item = payload[0].payload;
+                            return (
+                              <div className="bg-white p-3 rounded-lg shadow-lg border border-slate-200">
+                                <p className="font-medium text-slate-900">{item.name}</p>
+                                <p className="text-sm text-slate-600">
+                                  {item.value} 题 ({item.percentage}%)
+                                </p>
+                              </div>
+                            );
+                          }
+                          return null;
+                        }}
+                      />
+                    </PieChart>
+                  </ResponsiveContainer>
+                </div>
+                <div className="grid grid-cols-1 gap-2 mt-4">
+                  {reasonPieData.filter(d => d.value > 0).map((item, index) => (
+                    <div key={index} className="flex items-center justify-between p-2 bg-slate-50 rounded-lg">
                       <div className="flex items-center gap-2">
                         <span
-                          className={cn(
-                            'w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold text-white',
-                            index < 3
-                              ? 'bg-gradient-to-br from-error-500 to-error-700'
-                              : 'bg-slate-400'
-                          )}
-                        >
-                          {index + 1}
-                        </span>
-                        <h4 className="font-medium text-slate-900 truncate">
-                          {wp.chapterName}
-                        </h4>
+                          className="w-3 h-3 rounded-full"
+                          style={{ backgroundColor: item.color }}
+                        />
+                        <span className="text-sm text-slate-700">{item.name}</span>
                       </div>
-                      <p className="text-xs text-slate-500 mt-1 ml-8">
-                        {wp.recommendation}
-                      </p>
-                      <div className="mt-2 ml-8">
-                        <div className="flex items-center justify-between text-xs mb-1">
-                          <span className="text-error-600 font-medium">
-                            错误率 {Math.round(wp.errorRate * 100)}%
-                          </span>
-                          <span className="text-slate-500">
-                            错{wp.wrongCount}题 / 共{wp.totalCount}题
-                          </span>
-                        </div>
-                        <div className="h-2 bg-slate-200 rounded-full overflow-hidden">
-                          <div
-                            className={cn(
-                              'h-full rounded-full transition-all duration-500',
-                              wp.errorRate > 0.6
-                                ? 'bg-gradient-to-r from-error-400 to-error-600'
-                                : wp.errorRate > 0.4
-                                ? 'bg-gradient-to-r from-accent-400 to-accent-600'
-                                : 'bg-gradient-to-r from-slate-400 to-slate-500'
-                            )}
-                            style={{ width: `${wp.errorRate * 100}%` }}
-                          />
-                        </div>
+                      <div className="text-right">
+                        <span className="text-sm font-medium text-slate-900">{item.value}题</span>
+                        <span className="text-xs text-slate-500 ml-2">({item.percentage}%)</span>
                       </div>
                     </div>
-                    <button
-                      onClick={() => handleGoToPractice(wp.subjectId, wp.chapterId)}
-                      className="btn-primary px-3 py-1.5 text-sm whitespace-nowrap"
-                    >
-                      去练习
-                      <ChevronRight className="w-4 h-4" />
-                    </button>
-                  </div>
+                  ))}
                 </div>
-              ))
+              </>
             ) : (
               <div className="h-full flex items-center justify-center">
                 <Empty
                   icon={CheckCircle}
-                  title="太棒了！"
-                  description="目前没有薄弱知识点，继续保持！"
+                  title="暂无数据"
+                  description="完成练习后这里会显示错误原因统计"
                   className="border-0 shadow-none bg-transparent"
                 />
               </div>
             )}
           </div>
+        </div>
+      </div>
+
+      <div className="card p-6 animate-slide-up" style={{ animationDelay: '450ms' }}>
+        <div className="flex items-center gap-2 mb-4">
+          <AlertTriangle className="w-5 h-5 text-error-500" />
+          <h3 className="font-serif text-lg font-semibold text-slate-900">薄弱知识点排行</h3>
+        </div>
+        <div className="h-80 overflow-y-auto space-y-3 pr-2">
+          {weakPoints.length > 0 ? (
+            weakPoints.map((wp, index) => (
+              <div
+                key={wp.chapterId}
+                className="p-4 rounded-lg border border-slate-200 bg-slate-50 hover:border-error-300 hover:bg-error-50/50 transition-all duration-200"
+                style={{ animationDelay: `${index * 50}ms` }}
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span
+                        className={cn(
+                          'w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold text-white',
+                          index < 3
+                            ? 'bg-gradient-to-br from-error-500 to-error-700'
+                            : 'bg-slate-400'
+                        )}
+                      >
+                        {index + 1}
+                      </span>
+                      <h4 className="font-medium text-slate-900 truncate">
+                        {wp.chapterName}
+                      </h4>
+                    </div>
+                    <p className="text-xs text-slate-500 mt-1 ml-8">
+                      {wp.recommendation}
+                    </p>
+                    <div className="mt-2 ml-8">
+                      <div className="flex items-center justify-between text-xs mb-1">
+                        <span className="text-error-600 font-medium">
+                          错误率 {Math.round(wp.errorRate * 100)}%
+                        </span>
+                        <span className="text-slate-500">
+                          错{wp.wrongCount}题 / 共{wp.totalCount}题
+                        </span>
+                      </div>
+                      <div className="h-2 bg-slate-200 rounded-full overflow-hidden">
+                        <div
+                          className={cn(
+                            'h-full rounded-full transition-all duration-500',
+                            wp.errorRate >= 0.6
+                              ? 'bg-gradient-to-r from-error-400 to-error-600'
+                              : wp.errorRate >= 0.4
+                              ? 'bg-gradient-to-r from-accent-400 to-accent-600'
+                              : 'bg-gradient-to-r from-slate-400 to-slate-500'
+                          )}
+                          style={{ width: `${wp.errorRate * 100}%` }}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => handleGoToPractice(wp.subjectId, wp.chapterId)}
+                    className="btn-primary px-3 py-1.5 text-sm whitespace-nowrap"
+                  >
+                    去练习
+                    <ChevronRight className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+            ))
+          ) : (
+            <div className="h-full flex items-center justify-center">
+              <Empty
+                icon={CheckCircle}
+                title="太棒了！"
+                description="目前没有薄弱知识点，继续保持！"
+                className="border-0 shadow-none bg-transparent"
+              />
+            </div>
+          )}
         </div>
       </div>
     </div>
