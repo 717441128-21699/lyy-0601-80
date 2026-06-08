@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ChevronLeft, ChevronRight, Clock, Star, StarOff, FileText, CheckCircle, XCircle, AlertCircle, BookOpen } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Clock, Star, StarOff, FileText, CheckCircle, XCircle, AlertCircle, BookOpen, RefreshCw } from 'lucide-react';
 import { usePracticeStore } from '@/store/usePracticeStore';
 import { useWrongQuestionStore } from '@/store/useWrongQuestionStore';
 import { useNoteStore } from '@/store/useNoteStore';
@@ -23,9 +23,12 @@ export default function PracticePage() {
     finishSession,
     resetSession,
     mode,
+    sessionType,
+    getAnswerRecord,
+    updateAnswerReason,
   } = usePracticeStore();
 
-  const { addWrongQuestion } = useWrongQuestionStore();
+  const { addWrongQuestion, processReviewResults } = useWrongQuestionStore();
   const { getNotesByQuestion } = useNoteStore();
   const { toggleFavorite, getFilteredQuestions } = useQuestionBankStore();
   const { addDailyStat } = useAnalysisStore();
@@ -35,9 +38,11 @@ export default function PracticePage() {
   const [showResult, setShowResult] = useState(false);
   const [elapsedTime, setElapsedTime] = useState(0);
   const [questionTime, setQuestionTime] = useState(0);
+  const [reasonConfirmed, setReasonConfirmed] = useState(false);
 
   const currentQuestion = questions[currentQuestionIndex];
   const notes = currentQuestion ? getNotesByQuestion(currentQuestion.id) : [];
+  const currentRecord = currentQuestion ? getAnswerRecord(currentQuestion.id) : undefined;
 
   useEffect(() => {
     if (!isActive) return;
@@ -52,9 +57,10 @@ export default function PracticePage() {
 
   useEffect(() => {
     setSelectedAnswer(answers[currentQuestion?.id || ''] || '');
-    setSelectedReason(null);
+    setSelectedReason(currentRecord?.reasonType || null);
+    setReasonConfirmed(false);
     setQuestionTime(0);
-  }, [currentQuestionIndex, currentQuestion?.id]);
+  }, [currentQuestionIndex, currentQuestion?.id, currentRecord?.reasonType, answers]);
 
   const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
@@ -78,15 +84,54 @@ export default function PracticePage() {
 
   const handleSubmit = () => {
     if (!currentQuestion || !selectedAnswer) return;
-    submitAnswer(currentQuestion.id, selectedAnswer);
     
     const isCorrect = selectedAnswer === currentQuestion.correctAnswer;
+    
     if (!isCorrect) {
-      addWrongQuestion(currentQuestion.id, selectedAnswer, selectedReason || 'concept');
+      submitAnswer(currentQuestion.id, selectedAnswer);
+    } else {
+      submitAnswer(currentQuestion.id, selectedAnswer, undefined);
+      if (sessionType === 'wrong') {
+        processReviewResults([{ questionId: currentQuestion.id, correct: true }]);
+      }
     }
   };
 
+  const handleConfirmReason = () => {
+    if (!currentQuestion || !selectedReason) return;
+    
+    const isCorrect = selectedAnswer === currentQuestion.correctAnswer;
+    
+    submitAnswer(currentQuestion.id, selectedAnswer, selectedReason);
+    updateAnswerReason(currentQuestion.id, selectedReason);
+    
+    if (!isCorrect) {
+      if (sessionType === 'wrong') {
+        processReviewResults([{ 
+          questionId: currentQuestion.id, 
+          correct: false, 
+          reasonType: selectedReason 
+        }]);
+      } else {
+        addWrongQuestion(currentQuestion.id, selectedAnswer, selectedReason);
+      }
+    }
+    
+    setReasonConfirmed(true);
+  };
+
+  const canProceed = () => {
+    if (!showAnalysis) return false;
+    if (!currentQuestion) return false;
+    
+    const isCorrect = selectedAnswer === currentQuestion.correctAnswer;
+    if (isCorrect) return true;
+    return reasonConfirmed && selectedReason !== null;
+  };
+
   const handleNext = () => {
+    if (!canProceed()) return;
+    
     if (currentQuestionIndex < questions.length - 1) {
       nextQuestion();
     } else {
@@ -134,6 +179,8 @@ export default function PracticePage() {
     ([id, ans]) => questions.find((q) => q.id === id)?.correctAnswer === ans
   ).length;
 
+  const isReviewMode = sessionType === 'wrong';
+
   if (!isActive && !showResult) {
     return (
       <div className="min-h-[60vh] flex items-center justify-center stagger-animation">
@@ -173,6 +220,16 @@ export default function PracticePage() {
     return (
       <div className="max-w-2xl mx-auto stagger-animation">
         <div className="card p-8 text-center">
+          {isReviewMode && (
+            <div className="mb-6 p-4 bg-accent-50 border border-accent-200 rounded-lg">
+              <div className="flex items-center justify-center gap-2">
+                <RefreshCw className="w-5 h-5 text-accent-600" />
+                <span className="font-medium text-accent-700">复习模式</span>
+              </div>
+              <p className="text-sm text-accent-600 mt-1">已更新复习进度和下次复习时间</p>
+            </div>
+          )}
+          
           <div className="w-24 h-24 mx-auto mb-6 relative">
             <svg viewBox="0 0 100 100" className="w-full h-full -rotate-90">
               <circle cx="50" cy="50" r="45" fill="none" stroke="#E2E8F0" strokeWidth="8" />
@@ -198,7 +255,7 @@ export default function PracticePage() {
           <h2 className="font-serif text-2xl font-bold text-slate-900 mb-2">
             {accuracy >= 80 ? '太棒了！' : accuracy >= 60 ? '做得不错！' : '继续加油！'}
           </h2>
-          <p className="text-slate-500 mb-8">本次练习已完成</p>
+          <p className="text-slate-500 mb-8">{isReviewMode ? '本次复习已完成' : '本次练习已完成'}</p>
 
           <div className="grid grid-cols-3 gap-4 mb-8">
             <div className="p-4 bg-slate-50 rounded-lg">
@@ -250,6 +307,12 @@ export default function PracticePage() {
             <span className="text-sm font-medium text-slate-600">
               第 {currentQuestionIndex + 1} / {questions.length} 题
             </span>
+            {isReviewMode && (
+              <span className="badge bg-accent-100 text-accent-700">
+                <RefreshCw className="w-3 h-3 mr-1" />
+                复习模式
+              </span>
+            )}
             <span className={`badge ${QUESTION_TYPE_MAP[currentQuestion?.type || 'single'].color}`}>
               {QUESTION_TYPE_MAP[currentQuestion?.type || 'single'].label}
             </span>
@@ -372,16 +435,21 @@ export default function PracticePage() {
                   <div className="p-4 bg-error-50 border border-error-200 rounded-lg">
                     <div className="flex items-start gap-3">
                       <AlertCircle className="w-5 h-5 text-error-500 flex-shrink-0 mt-0.5" />
-                      <div>
-                        <p className="font-medium text-error-700 mb-2">选择错误原因</p>
-                        <div className="flex flex-wrap gap-2">
+                      <div className="flex-1">
+                        <p className="font-medium text-error-700 mb-2">
+                          {reasonConfirmed ? '已选择错误原因' : '请选择错误原因'}
+                        </p>
+                        <div className="flex flex-wrap gap-2 mb-3">
                           {REASON_TYPES.map((reason) => (
                             <button
                               key={reason.value}
-                              onClick={() => setSelectedReason(reason.value)}
+                              onClick={() => !reasonConfirmed && setSelectedReason(reason.value)}
+                              disabled={reasonConfirmed}
                               className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
                                 selectedReason === reason.value
                                   ? 'bg-error-500 text-white'
+                                  : reasonConfirmed
+                                  ? 'bg-slate-100 text-slate-400 cursor-not-allowed'
                                   : 'bg-white border border-error-300 text-error-700 hover:bg-error-100'
                               }`}
                             >
@@ -389,6 +457,15 @@ export default function PracticePage() {
                             </button>
                           ))}
                         </div>
+                        {!reasonConfirmed && (
+                          <button
+                            onClick={handleConfirmReason}
+                            disabled={!selectedReason}
+                            className="btn-error px-4 py-1.5 text-sm"
+                          >
+                            确认原因
+                          </button>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -432,7 +509,11 @@ export default function PracticePage() {
                       上一题
                     </button>
                   )}
-                  <button onClick={handleNext} className="btn-primary">
+                  <button 
+                    onClick={handleNext} 
+                    className="btn-primary"
+                    disabled={!canProceed()}
+                  >
                     {currentQuestionIndex < questions.length - 1 ? (
                       <>
                         下一题

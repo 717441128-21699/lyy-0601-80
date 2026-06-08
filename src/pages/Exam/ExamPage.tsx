@@ -98,6 +98,7 @@ export default function ExamPage() {
     getExamTrend,
     getStats,
     getExamRanking,
+    updateSubjectiveScore,
   } = useExamStore();
 
   const { questions } = useQuestionBankStore();
@@ -111,11 +112,23 @@ export default function ExamPage() {
   const [showAnswerSheet, setShowAnswerSheet] = useState(false);
   const [localSubjectiveScores, setLocalSubjectiveScores] = useState<Record<string, number>>({});
   const [rankingInfo, setRankingInfo] = useState<{ ranking: number; total: number; percentile: number } | null>(null);
+  const [showAnalysisModal, setShowAnalysisModal] = useState(false);
+  const [analysisQuestionIndex, setAnalysisQuestionIndex] = useState(0);
 
   const handleSubmitExamRef = useRef<() => void>(() => {});
 
   const stats = getStats();
   const trendData = getExamTrend();
+
+  useEffect(() => {
+    if (currentView === 'result' && completedExam) {
+      const updated = examRecords.find((r) => r.id === completedExam.id);
+      if (updated) {
+        setCompletedExam(updated);
+        setRankingInfo(getExamRanking(updated.userScore));
+      }
+    }
+  }, [examRecords, currentView, completedExam?.id, getExamRanking]);
 
   useEffect(() => {
     if (isExamActive && currentExam) {
@@ -228,8 +241,13 @@ export default function ExamPage() {
   const handleSubjectiveScoreChange = useCallback((questionId: string, score: number, maxScore: number) => {
     const clampedScore = Math.max(0, Math.min(maxScore, score));
     setLocalSubjectiveScores((prev) => ({ ...prev, [questionId]: clampedScore }));
-    submitSubjectiveScore(questionId, clampedScore, maxScore);
-  }, [submitSubjectiveScore]);
+    
+    if (currentView === 'result' && completedExam) {
+      updateSubjectiveScore(completedExam.id, questionId, clampedScore);
+    } else {
+      submitSubjectiveScore(questionId, clampedScore, maxScore);
+    }
+  }, [currentView, completedExam?.id, updateSubjectiveScore, submitSubjectiveScore]);
 
   const handleSubmitExam = useCallback(() => {
     if (!currentExam) return;
@@ -1051,10 +1069,181 @@ export default function ExamPage() {
             <Play className="w-4 h-4" />
             再来一次
           </button>
-          <button className="btn-accent px-8">
+          <button 
+            onClick={() => {
+              setAnalysisQuestionIndex(0);
+              setShowAnalysisModal(true);
+            }} 
+            className="btn-accent px-8"
+          >
             <Eye className="w-4 h-4" />
             查看解析
           </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (showAnalysisModal && completedExam) {
+    const analysisQuestion = questions.find(
+      (q) => q.id === completedExam.questionIds[analysisQuestionIndex]
+    );
+    const userAnswer = completedExam.answers[analysisQuestion?.id || ''] || '';
+    const isCorrect = analysisQuestion 
+      ? analysisQuestion.type === 'subjective'
+        ? (completedExam.subjectiveScores?.find((s) => s.questionId === analysisQuestion.id)?.score || 0) >= 
+          (completedExam.totalScore / completedExam.totalQuestions) * 0.6
+        : userAnswer === analysisQuestion.correctAnswer
+      : false;
+
+    return (
+      <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+        <div className="bg-white rounded-2xl w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
+          <div className="p-6 border-b border-slate-200 flex items-center justify-between">
+            <div>
+              <h3 className="font-serif text-xl font-bold text-slate-900">
+                第 {analysisQuestionIndex + 1} 题解析
+              </h3>
+              <p className="text-sm text-slate-500 mt-1">
+                共 {completedExam.questionIds.length} 题
+              </p>
+            </div>
+            <button
+              onClick={() => setShowAnalysisModal(false)}
+              className="p-2 hover:bg-slate-100 rounded-lg transition-colors"
+            >
+              <XCircle className="w-6 h-6 text-slate-400" />
+            </button>
+          </div>
+
+          <div className="flex-1 overflow-y-auto p-6">
+            {analysisQuestion && (
+              <>
+                <div className="flex items-center gap-2 mb-4">
+                  <span className={`badge ${QUESTION_TYPE_MAP[analysisQuestion.type].color}`}>
+                    {QUESTION_TYPE_MAP[analysisQuestion.type].label}
+                  </span>
+                  <span className={`badge ${DIFFICULTY_MAP[analysisQuestion.difficulty].color}`}>
+                    {DIFFICULTY_MAP[analysisQuestion.difficulty].label}
+                  </span>
+                  <span className={`badge ${isCorrect ? 'bg-success-100 text-success-700' : 'bg-error-100 text-error-700'}`}>
+                    {isCorrect ? '回答正确' : '回答错误'}
+                  </span>
+                </div>
+
+                <div className="flex flex-wrap gap-2 mb-4">
+                  {analysisQuestion.knowledgePoints.map((kp) => (
+                    <span key={kp} className="badge-slate">
+                      {kp}
+                    </span>
+                  ))}
+                </div>
+
+                <div className="mb-6">
+                  <p className="font-medium text-slate-700 mb-2">题目</p>
+                  <p className="text-slate-900 leading-relaxed">{analysisQuestion.content}</p>
+                </div>
+
+                {analysisQuestion.options && analysisQuestion.type !== 'subjective' && (
+                  <div className="mb-6">
+                    <p className="font-medium text-slate-700 mb-2">选项</p>
+                    <div className="space-y-2">
+                      {analysisQuestion.options.map((option) => {
+                        const isCorrectOption = analysisQuestion.correctAnswer.includes(option.label);
+                        const isUserSelected = userAnswer.includes(option.label);
+                        return (
+                          <div
+                            key={option.label}
+                            className={`p-3 rounded-lg border ${
+                              isCorrectOption
+                                ? 'border-success-300 bg-success-50'
+                                : isUserSelected
+                                ? 'border-error-300 bg-error-50'
+                                : 'border-slate-200'
+                            }`}
+                          >
+                            <div className="flex items-start gap-3">
+                              <span
+                                className={`w-6 h-6 rounded-full flex items-center justify-center text-sm font-semibold flex-shrink-0 ${
+                                  isCorrectOption
+                                    ? 'bg-success-500 text-white'
+                                    : isUserSelected
+                                    ? 'bg-error-500 text-white'
+                                    : 'bg-slate-200 text-slate-600'
+                                }`}
+                              >
+                                {option.label}
+                              </span>
+                              <span className="flex-1">{option.text}</span>
+                              {isCorrectOption && (
+                                <CheckCircle className="w-5 h-5 text-success-500 flex-shrink-0" />
+                              )}
+                              {!isCorrectOption && isUserSelected && (
+                                <XCircle className="w-5 h-5 text-error-500 flex-shrink-0" />
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+                  <div className="p-4 bg-slate-50 rounded-lg">
+                    <p className="font-medium text-slate-700 mb-2">你的答案</p>
+                    <p className={`text-lg font-semibold ${isCorrect ? 'text-success-600' : 'text-error-600'}`}>
+                      {userAnswer || '未作答'}
+                    </p>
+                    {analysisQuestion.type === 'subjective' && (
+                      <p className="text-sm text-slate-500 mt-1">
+                        得分：{completedExam.subjectiveScores?.find((s) => s.questionId === analysisQuestion.id)?.score || 0}
+                        / {completedExam.totalScore / completedExam.totalQuestions}
+                      </p>
+                    )}
+                  </div>
+                  <div className="p-4 bg-primary-50 rounded-lg">
+                    <p className="font-medium text-primary-700 mb-2">正确答案</p>
+                    <p className="text-lg font-semibold text-primary-600">
+                      {analysisQuestion.correctAnswer}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="p-4 bg-slate-50 rounded-lg mb-4">
+                  <p className="font-medium text-slate-700 mb-2">答案解析</p>
+                  <p className="text-slate-600 leading-relaxed">{analysisQuestion.analysis}</p>
+                </div>
+
+                <div className="p-4 bg-accent-50 rounded-lg">
+                  <p className="font-medium text-accent-700 mb-2">关联法条</p>
+                  <p className="text-accent-600">{analysisQuestion.lawReference}</p>
+                </div>
+              </>
+            )}
+          </div>
+
+          <div className="p-6 border-t border-slate-200 flex items-center justify-between">
+            <button
+              onClick={() => setAnalysisQuestionIndex((i) => Math.max(0, i - 1))}
+              disabled={analysisQuestionIndex === 0}
+              className="btn-secondary"
+            >
+              <ChevronLeft className="w-4 h-4" />
+              上一题
+            </button>
+            <span className="text-sm text-slate-500">
+              {analysisQuestionIndex + 1} / {completedExam.questionIds.length}
+            </span>
+            <button
+              onClick={() => setAnalysisQuestionIndex((i) => Math.min(completedExam.questionIds.length - 1, i + 1))}
+              disabled={analysisQuestionIndex === completedExam.questionIds.length - 1}
+              className="btn-primary"
+            >
+              下一题
+              <ChevronRight className="w-4 h-4" />
+            </button>
+          </div>
         </div>
       </div>
     );

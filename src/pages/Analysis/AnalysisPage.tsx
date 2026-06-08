@@ -60,7 +60,10 @@ export default function AnalysisPage() {
   const overviewStats = getOverviewStats();
   const dailyStats = getDailyStats();
   const radarData = getRadarData();
-  const subjectAccuracy = getSubjectAccuracy();
+  const subjectAccuracy = getSubjectAccuracy().map((item) => ({
+    ...item,
+    accuracyRate: Math.round(item.accuracyRate * 100),
+  }));
   const weakPoints = getWeakPoints().slice(0, 10);
   const scoreTrend = getScoreTrend();
 

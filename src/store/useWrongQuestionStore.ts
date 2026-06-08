@@ -2,8 +2,15 @@ import { create } from 'zustand';
 import type { WrongQuestion, WeakPoint, ReasonType } from '@/types';
 import { mockWrongQuestions, generateId } from '@/mock/data';
 import { useQuestionBankStore } from './useQuestionBankStore';
+import { loadFromStorage, saveToStorage, STORAGE_KEYS, migrateDates } from '@/lib/persist';
 
 const INTERVALS = [1, 2, 4, 7, 15, 30];
+
+const loadWrongQuestions = (): WrongQuestion[] => {
+  const stored = loadFromStorage<WrongQuestion[]>(STORAGE_KEYS.WRONG_QUESTIONS, []);
+  if (stored.length === 0) return mockWrongQuestions;
+  return migrateDates<WrongQuestion>(stored, ['wrongAt', 'nextReviewAt']);
+};
 
 interface WrongQuestionState {
   wrongQuestions: WrongQuestion[];
@@ -16,10 +23,12 @@ interface WrongQuestionState {
   updateReason: (id: string, reasonType: ReasonType) => void;
   markAsReviewed: (id: string, correct: boolean) => void;
   markAsMastered: (id: string) => void;
+  processReviewResults: (results: Array<{ questionId: string; correct: boolean; reasonType?: ReasonType }>) => void;
   getTodayReviews: () => WrongQuestion[];
   getWeakPoints: () => WeakPoint[];
   getWrongQuestionsBySubject: (subjectId: string) => WrongQuestion[];
   getWrongQuestionsByReason: (reason: ReasonType) => WrongQuestion[];
+  getReasonStats: () => Array<{ reason: ReasonType; count: number; percentage: number }>;
 }
 
 const calculateNextReview = (wrongQuestion: WrongQuestion): Date => {
@@ -36,16 +45,21 @@ const calculateNextReview = (wrongQuestion: WrongQuestion): Date => {
   return nextReview;
 };
 
+const persist = (wrongQuestions: WrongQuestion[]) => {
+  saveToStorage(STORAGE_KEYS.WRONG_QUESTIONS, wrongQuestions);
+};
+
 export const useWrongQuestionStore = create<WrongQuestionState>((set, get) => ({
-  wrongQuestions: mockWrongQuestions,
+  wrongQuestions: loadWrongQuestions(),
   reasonTypes: ['concept', 'law', 'review', 'careless', 'other'],
 
   addWrongQuestion: (questionId, wrongAnswer, reasonType) => {
-    const existing = get().wrongQuestions.find((wq) => wq.questionId === questionId);
-    
-    if (existing) {
-      set((state) => ({
-        wrongQuestions: state.wrongQuestions.map((wq) =>
+    set((state) => {
+      const existing = state.wrongQuestions.find((wq) => wq.questionId === questionId);
+      let newWrongQuestions: WrongQuestion[];
+      
+      if (existing) {
+        newWrongQuestions = state.wrongQuestions.map((wq) =>
           wq.id === existing.id
             ? {
                 ...wq,
@@ -58,34 +72,39 @@ export const useWrongQuestionStore = create<WrongQuestionState>((set, get) => ({
                 mastered: false,
               }
             : wq
-        ),
-      }));
-    } else {
-      const newWrong: WrongQuestion = {
-        id: generateId(),
-        questionId,
-        wrongAnswer,
-        reasonType,
-        reviewCount: 0,
-        correctInReview: 0,
-        wrongAt: new Date(),
-        nextReviewAt: new Date(),
-        mastered: false,
-      };
-      set((state) => ({ wrongQuestions: [...state.wrongQuestions, newWrong] }));
-    }
+        );
+      } else {
+        const newWrong: WrongQuestion = {
+          id: generateId(),
+          questionId,
+          wrongAnswer,
+          reasonType,
+          reviewCount: 0,
+          correctInReview: 0,
+          wrongAt: new Date(),
+          nextReviewAt: new Date(),
+          mastered: false,
+        };
+        newWrongQuestions = [...state.wrongQuestions, newWrong];
+      }
+      
+      persist(newWrongQuestions);
+      return { wrongQuestions: newWrongQuestions };
+    });
   },
 
   updateReason: (id, reasonType) =>
-    set((state) => ({
-      wrongQuestions: state.wrongQuestions.map((wq) =>
+    set((state) => {
+      const newWrongQuestions = state.wrongQuestions.map((wq) =>
         wq.id === id ? { ...wq, reasonType } : wq
-      ),
-    })),
+      );
+      persist(newWrongQuestions);
+      return { wrongQuestions: newWrongQuestions };
+    }),
 
   markAsReviewed: (id, correct) =>
-    set((state) => ({
-      wrongQuestions: state.wrongQuestions.map((wq) => {
+    set((state) => {
+      const newWrongQuestions = state.wrongQuestions.map((wq) => {
         if (wq.id !== id) return wq;
         const updated = {
           ...wq,
@@ -97,15 +116,58 @@ export const useWrongQuestionStore = create<WrongQuestionState>((set, get) => ({
           nextReviewAt: calculateNextReview(updated),
           mastered: updated.correctInReview >= 3,
         };
-      }),
-    })),
+      });
+      persist(newWrongQuestions);
+      return { wrongQuestions: newWrongQuestions };
+    }),
 
   markAsMastered: (id) =>
-    set((state) => ({
-      wrongQuestions: state.wrongQuestions.map((wq) =>
+    set((state) => {
+      const newWrongQuestions = state.wrongQuestions.map((wq) =>
         wq.id === id ? { ...wq, mastered: true } : wq
-      ),
-    })),
+      );
+      persist(newWrongQuestions);
+      return { wrongQuestions: newWrongQuestions };
+    }),
+
+  processReviewResults: (results) => {
+    set((state) => {
+      const newWrongQuestions = [...state.wrongQuestions];
+      
+      results.forEach(({ questionId, correct, reasonType }) => {
+        const index = newWrongQuestions.findIndex((wq) => wq.questionId === questionId);
+        if (index === -1) return;
+        
+        const wq = newWrongQuestions[index];
+        
+        if (correct) {
+          const updated = {
+            ...wq,
+            reviewCount: wq.reviewCount + 1,
+            correctInReview: wq.correctInReview + 1,
+          };
+          newWrongQuestions[index] = {
+            ...updated,
+            nextReviewAt: calculateNextReview(updated),
+            mastered: updated.correctInReview >= 3,
+          };
+        } else {
+          newWrongQuestions[index] = {
+            ...wq,
+            reviewCount: 0,
+            correctInReview: 0,
+            wrongAt: new Date(),
+            nextReviewAt: new Date(),
+            mastered: false,
+            reasonType: reasonType || wq.reasonType,
+          };
+        }
+      });
+      
+      persist(newWrongQuestions);
+      return { wrongQuestions: newWrongQuestions };
+    });
+  },
 
   getTodayReviews: () => {
     const today = new Date();
@@ -199,4 +261,19 @@ export const useWrongQuestionStore = create<WrongQuestionState>((set, get) => ({
 
   getWrongQuestionsByReason: (reason) =>
     get().wrongQuestions.filter((wq) => wq.reasonType === reason),
+
+  getReasonStats: () => {
+    const { wrongQuestions, reasonTypes } = get();
+    const activeWrongQuestions = wrongQuestions.filter((wq) => !wq.mastered);
+    const total = activeWrongQuestions.length;
+    
+    return reasonTypes.map((reason) => {
+      const count = activeWrongQuestions.filter((wq) => wq.reasonType === reason).length;
+      return {
+        reason,
+        count,
+        percentage: total > 0 ? Math.round((count / total) * 100) : 0,
+      };
+    });
+  },
 }));

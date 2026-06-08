@@ -1,6 +1,17 @@
 import { create } from 'zustand';
 import type { UserProfile, StudyPlanTask } from '@/types';
 import { mockUserProfile, mockStudyTasks, generateId } from '@/mock/data';
+import { loadFromStorage, saveToStorage, STORAGE_KEYS, migrateDates } from '@/lib/persist';
+
+const loadProfile = (): UserProfile => {
+  const loaded = loadFromStorage<UserProfile>(STORAGE_KEYS.USER_PROFILE, mockUserProfile);
+  return loaded;
+};
+
+const loadTodayTasks = (): StudyPlanTask[] => {
+  const loaded = loadFromStorage<StudyPlanTask[]>(STORAGE_KEYS.TODAY_TASKS, mockStudyTasks);
+  return migrateDates<StudyPlanTask>(loaded, ['createdAt']);
+};
 
 interface UserState {
   profile: UserProfile;
@@ -12,22 +23,26 @@ interface UserState {
 }
 
 export const useUserStore = create<UserState>((set, get) => ({
-  profile: mockUserProfile,
-  todayTasks: mockStudyTasks,
+  profile: loadProfile(),
+  todayTasks: loadTodayTasks(),
 
   updateProfile: (data) =>
-    set((state) => ({
-      profile: { ...state.profile, ...data },
-    })),
+    set((state) => {
+      const newProfile = { ...state.profile, ...data };
+      saveToStorage(STORAGE_KEYS.USER_PROFILE, newProfile);
+      return { profile: newProfile };
+    }),
 
   completeTask: (taskId) =>
-    set((state) => ({
-      todayTasks: state.todayTasks.map((task) =>
+    set((state) => {
+      const newTasks = state.todayTasks.map((task) =>
         task.id === taskId
           ? { ...task, completed: true, completedCount: task.targetCount }
           : task
-      ),
-    })),
+      );
+      saveToStorage(STORAGE_KEYS.TODAY_TASKS, newTasks);
+      return { todayTasks: newTasks };
+    }),
 
   addTask: (task) => {
     const newTask: StudyPlanTask = {
@@ -36,14 +51,16 @@ export const useUserStore = create<UserState>((set, get) => ({
       completed: false,
       createdAt: new Date(),
     };
-    set((state) => ({
-      todayTasks: [...state.todayTasks, newTask],
-    }));
+    set((state) => {
+      const newTasks = [...state.todayTasks, newTask];
+      saveToStorage(STORAGE_KEYS.TODAY_TASKS, newTasks);
+      return { todayTasks: newTasks };
+    });
   },
 
   updateTaskProgress: (taskId, increment) =>
-    set((state) => ({
-      todayTasks: state.todayTasks.map((task) => {
+    set((state) => {
+      const newTasks = state.todayTasks.map((task) => {
         if (task.id !== taskId) return task;
         const newCount = Math.min(task.completedCount + increment, task.targetCount);
         return {
@@ -51,6 +68,8 @@ export const useUserStore = create<UserState>((set, get) => ({
           completedCount: newCount,
           completed: newCount >= task.targetCount,
         };
-      }),
-    })),
+      });
+      saveToStorage(STORAGE_KEYS.TODAY_TASKS, newTasks);
+      return { todayTasks: newTasks };
+    }),
 }));

@@ -2,6 +2,12 @@ import { create } from 'zustand';
 import type { ExamRecord } from '@/types';
 import { mockExamRecords, generateId } from '@/mock/data';
 import { useQuestionBankStore } from './useQuestionBankStore';
+import { loadFromStorage, saveToStorage, STORAGE_KEYS, migrateDates } from '@/lib/persist';
+
+const loadExamRecords = (): ExamRecord[] => {
+  const stored = loadFromStorage<ExamRecord[]>(STORAGE_KEYS.EXAM_RECORDS, mockExamRecords);
+  return migrateDates<ExamRecord>(stored, ['createdAt']);
+};
 
 interface ExamState {
   examRecords: ExamRecord[];
@@ -17,6 +23,7 @@ interface ExamState {
   nextQuestion: () => void;
   prevQuestion: () => void;
   finishExam: () => ExamRecord | null;
+  updateSubjectiveScore: (examId: string, questionId: string, score: number) => void;
   getExamRanking: (score: number) => { ranking: number; total: number; percentile: number };
   getExamTrend: () => Array<{ date: string; score: number }>;
   getStats: () => {
@@ -28,7 +35,7 @@ interface ExamState {
 }
 
 export const useExamStore = create<ExamState>((set, get) => ({
-  examRecords: mockExamRecords,
+  examRecords: loadExamRecords(),
   currentExam: null,
   isExamActive: false,
   startTime: null,
@@ -143,14 +150,69 @@ export const useExamStore = create<ExamState>((set, get) => ({
       createdAt: new Date(),
     };
 
-    set((state) => ({
-      examRecords: [completedExam, ...state.examRecords],
-      isExamActive: false,
-      currentExam: null,
-      startTime: null,
-    }));
+    set((state) => {
+      const newExamRecords = [completedExam, ...state.examRecords];
+      saveToStorage(STORAGE_KEYS.EXAM_RECORDS, newExamRecords);
+      return {
+        examRecords: newExamRecords,
+        isExamActive: false,
+        currentExam: null,
+        startTime: null,
+      };
+    });
 
     return completedExam;
+  },
+
+  updateSubjectiveScore: (examId, questionId, score) => {
+    const { examRecords } = get();
+    const { questions } = useQuestionBankStore.getState();
+
+    const updatedRecords = examRecords.map((record) => {
+      if (record.id !== examId) return record;
+
+      const questionScore = record.totalScore / record.totalQuestions;
+
+      const updatedSubjectiveScores = record.subjectiveScores
+        ? record.subjectiveScores.map((ss) =>
+            ss.questionId === questionId ? { ...ss, score } : ss
+          )
+        : [];
+
+      let correctCount = 0;
+      let userScore = 0;
+
+      record.questionIds.forEach((qId) => {
+        const question = questions.find((q) => q.id === qId);
+        if (!question) return;
+
+        const userAnswer = record.answers[qId] || '';
+
+        if (question.type === 'subjective') {
+          const ss = updatedSubjectiveScores.find((s) => s.questionId === qId);
+          userScore += ss?.score || 0;
+        } else {
+          if (userAnswer === question.correctAnswer) {
+            correctCount++;
+            userScore += questionScore;
+          }
+        }
+      });
+
+      const ranking = get().getExamRanking(Math.round(userScore * 10) / 10);
+
+      return {
+        ...record,
+        correctCount,
+        userScore: Math.round(userScore * 10) / 10,
+        subjectiveScores: updatedSubjectiveScores,
+        ranking: ranking.ranking,
+        totalParticipants: ranking.total,
+      };
+    });
+
+    saveToStorage(STORAGE_KEYS.EXAM_RECORDS, updatedRecords);
+    set({ examRecords: updatedRecords });
   },
 
   getExamRanking: (score) => {

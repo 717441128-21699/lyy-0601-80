@@ -1,6 +1,19 @@
 import { create } from 'zustand';
 import type { Subject, Chapter, Question } from '@/types';
 import { mockSubjects, mockChapters, mockQuestions } from '@/mock/data';
+import { loadFromStorage, saveToStorage, STORAGE_KEYS } from '@/lib/persist';
+
+const loadFavorites = (): string[] => {
+  return loadFromStorage<string[]>(STORAGE_KEYS.QUESTION_FAVORITES, []);
+};
+
+const initializeQuestions = (): Question[] => {
+  const favoriteIds = loadFavorites();
+  return mockQuestions.map((q) => ({
+    ...q,
+    isFavorite: favoriteIds.includes(q.id),
+  }));
+};
 
 interface QuestionBankState {
   subjects: Subject[];
@@ -25,7 +38,7 @@ interface QuestionBankState {
 export const useQuestionBankStore = create<QuestionBankState>((set, get) => ({
   subjects: mockSubjects,
   chapters: mockChapters,
-  questions: mockQuestions,
+  questions: initializeQuestions(),
   currentSubject: null,
   currentChapter: null,
   searchKeyword: '',
@@ -41,11 +54,16 @@ export const useQuestionBankStore = create<QuestionBankState>((set, get) => ({
   toggleFavoritesOnly: () => set((state) => ({ showFavoritesOnly: !state.showFavoritesOnly })),
 
   toggleFavorite: (questionId) =>
-    set((state) => ({
-      questions: state.questions.map((q) =>
+    set((state) => {
+      const updatedQuestions = state.questions.map((q) =>
         q.id === questionId ? { ...q, isFavorite: !q.isFavorite } : q
-      ),
-    })),
+      );
+      const favoriteIds = updatedQuestions
+        .filter((q) => q.isFavorite)
+        .map((q) => q.id);
+      saveToStorage(STORAGE_KEYS.QUESTION_FAVORITES, favoriteIds);
+      return { questions: updatedQuestions };
+    }),
 
   getFilteredQuestions: () => {
     const {

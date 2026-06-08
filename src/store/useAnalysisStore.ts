@@ -4,6 +4,11 @@ import { mockDailyStats, mockHeatmapData, mockRadarData } from '@/mock/data';
 import { useWrongQuestionStore } from './useWrongQuestionStore';
 import { useExamStore } from './useExamStore';
 import { useQuestionBankStore } from './useQuestionBankStore';
+import { loadFromStorage, saveToStorage, STORAGE_KEYS } from '@/lib/persist';
+
+const loadDailyStats = (): DailyStat[] => {
+  return loadFromStorage(STORAGE_KEYS.DAILY_STATS, mockDailyStats);
+};
 
 interface AnalysisState {
   dailyStats: DailyStat[];
@@ -26,7 +31,7 @@ interface AnalysisState {
 }
 
 export const useAnalysisStore = create<AnalysisState>((set, get) => ({
-  dailyStats: mockDailyStats,
+  dailyStats: loadDailyStats(),
   heatmapData: mockHeatmapData,
   radarData: mockRadarData,
 
@@ -106,20 +111,21 @@ export const useAnalysisStore = create<AnalysisState>((set, get) => ({
           accuracyRate: (existing.correctCount + correct) / (existing.questionCount + questions),
           studyTime: existing.studyTime + time,
         };
+        saveToStorage(STORAGE_KEYS.DAILY_STATS, updated);
         return { dailyStats: updated };
       } else {
-        return {
-          dailyStats: [
-            ...state.dailyStats,
-            {
-              date: today,
-              questionCount: questions,
-              correctCount: correct,
-              accuracyRate: questions > 0 ? correct / questions : 0,
-              studyTime: time,
-            },
-          ],
-        };
+        const updated = [
+          ...state.dailyStats,
+          {
+            date: today,
+            questionCount: questions,
+            correctCount: correct,
+            accuracyRate: questions > 0 ? correct / questions : 0,
+            studyTime: time,
+          },
+        ];
+        saveToStorage(STORAGE_KEYS.DAILY_STATS, updated);
+        return { dailyStats: updated };
       }
     });
   },
